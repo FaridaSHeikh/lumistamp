@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LumiStamp · Karte erstellen</title>
+<style>
+:root { --accent: #ff6b35; --bg: #0f0f0f; --surface: #1a1a1a; --surface2: #242424; --border: #2e2e2e; --text: #f0ede8; --muted: #888; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+.topbar { display: flex; align-items: center; gap: 10px; padding: 14px 20px; border-bottom: 1px solid var(--border); }
+.logo { font-size: 17px; font-weight: 700; } .logo span { color: var(--accent); }
+.content { max-width: 420px; margin: 0 auto; padding: 28px 20px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 22px; margin-bottom: 14px; }
+.label { font-size: 12px; color: var(--muted); font-weight: 500; display: block; margin-bottom: 6px; }
+.input { width: 100%; padding: 13px 14px; background: var(--surface2); border: 1px solid var(--border); border-radius: 9px; color: var(--text); font-size: 15px; font-family: inherit; outline: none; transition: border-color .15s; margin-bottom: 14px; }
+.input:focus { border-color: var(--accent); }
+.btn { width: 100%; padding: 15px; font-size: 15px; font-weight: 600; border: none; border-radius: 11px; cursor: pointer; font-family: inherit; background: var(--accent); color: white; transition: all .15s; }
+.btn:hover { background: #e55a25; } .btn:active { transform: scale(0.98); }
+.btn:disabled { background: #333; color: var(--muted); cursor: default; transform: none; }
+.center { text-align: center; }
+.big-emoji { font-size: 56px; display: block; text-align: center; margin-bottom: 14px; }
+h1 { font-size: 22px; font-weight: 700; margin-bottom: 6px; text-align: center; }
+.subtitle { font-size: 14px; color: var(--muted); text-align: center; line-height: 1.6; margin-bottom: 22px; }
+.tag { display: inline-block; background: rgba(255,107,53,0.1); color: var(--accent); border: 1px solid rgba(255,107,53,0.25); border-radius: 20px; font-size: 12px; padding: 3px 12px; margin-bottom: 18px; }
+.privacy-box { background: rgba(74,222,128,0.05); border: 1px solid rgba(74,222,128,0.2); border-radius: 10px; padding: 12px 14px; font-size: 12px; color: #aaa; line-height: 1.7; margin-bottom: 16px; }
+.privacy-box strong { color: #4ade80; display: block; margin-bottom: 4px; }
+.loading { text-align: center; padding: 40px 20px; }
+.spinner { width: 36px; height: 36px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 14px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.error-box { background: rgba(255,100,100,0.08); border: 1px solid rgba(255,100,100,0.3); border-radius: 10px; padding: 16px; text-align: center; }
+.error-box h3 { color: #ff6b6b; margin-bottom: 8px; }
+.error-box p { font-size: 13px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="logo">Lumi<span>Stamp</span></div>
+</div>
+
+<div class="content">
+  <!-- Loading -->
+  <div id="view-loading">
+    <div class="loading">
+      <div class="spinner"></div>
+      <div style="font-size:14px;color:var(--muted)">Restaurant wird geladen...</div>
+    </div>
+  </div>
+
+  <!-- Error -->
+  <div id="view-error" style="display:none">
+    <div class="error-box">
+      <h3>⚠️ Ungültiger QR-Code</h3>
+      <p>Dieser Link ist nicht gültig. Bitte scanne den QR-Code am Eingang des Restaurants.</p>
+    </div>
+  </div>
+
+  <!-- Registration Form -->
+  <div id="view-form" style="display:none">
+    <div class="card">
+      <span class="big-emoji" id="restaurant-symbol">☕</span>
+      <h1 id="restaurant-name">Café Milano</h1>
+      <p class="subtitle" id="restaurant-subtitle">Erstelle jetzt deine kostenlose Treuekarte.</p>
+      <div class="center"><span class="tag" id="restaurant-reward-tag">10 Stempel = Gratis Kaffee</span></div>
+
+      <label class="label">Dein Name *</label>
+      <input class="input" id="customer-name" placeholder="z.B. Maria" type="text" autocomplete="given-name">
+
+      <label class="label">Geburtstag (optional — für Geburtstagsgeschenk)</label>
+      <input class="input" id="customer-birthday" type="date">
+
+      <div class="privacy-box">
+        <strong>🔒 Datenschutz</strong>
+        Wir speichern nur deinen Namen und deine Stempel. Keine E-Mail, kein Passwort, keine Weitergabe an Dritte. Du kannst deine Daten jederzeit löschen.
+      </div>
+
+      <button class="btn" id="register-btn" onclick="registerCustomer()">
+        Meine Karte erstellen →
+      </button>
+    </div>
+  </div>
+
+  <!-- Already registered -->
+  <div id="view-exists" style="display:none">
+    <div class="card center">
+      <span class="big-emoji">👋</span>
+      <h1>Willkommen zurück!</h1>
+      <p class="subtitle">Du hast bereits eine Karte für dieses Restaurant.</p>
+      <button class="btn" onclick="goToMyCard()">Meine Karte öffnen</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const SUPA_URL = 'https://lmigwkzityqembhobykq.supabase.co';
+const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxtaWd3a3ppdHlxZW1iaG9ieWtxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI2ODk3NTAsImV4cCI6MjA5ODI2NTc1MH0.nGz35MMHr1_KZb9z6bk82uxqlT2fTMvGJBPZAXRztgU';
+const H = { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=representation' };
+
+let restaurantId = null;
+let restaurant = null;
+
+function show(id) {
+  ['view-loading','view-error','view-form','view-exists'].forEach(v => {
+    document.getElementById(v).style.display = v === id ? 'block' : 'none';
+  });
+}
+
+async function init() {
+  // Restaurant-ID aus URL holen
+  restaurantId = new URLSearchParams(window.location.search).get('r');
+  if (!restaurantId) { show('view-error'); return; }
+
+  // Prüfen ob Kunde bereits registriert
+  const myCardId = localStorage.getItem('lumi_card_' + restaurantId);
+  if (myCardId) { show('view-exists'); return; }
+
+  try {
+    // Restaurant-Daten laden
+    const res = await fetch(`${SUPA_URL}/rest/v1/restaurants?id=eq.${restaurantId}&select=*`, { headers: H });
+    const data = await res.json();
+    if (!data.length) { show('view-error'); return; }
+    restaurant = data[0];
+
+    // Hauptbelohnung laden
+    const rwRes = await fetch(`${SUPA_URL}/rest/v1/reward_stages?restaurant_id=eq.${restaurantId}&order=stamps_required.asc&limit=1`, { headers: H });
+    const rewards = await rwRes.json();
+    const mainReward = rewards[0];
+
+    // UI füllen
+    document.getElementById('restaurant-symbol').textContent = restaurant.symbol || '☕';
+    document.getElementById('restaurant-name').textContent = restaurant.name;
+    document.getElementById('restaurant-subtitle').textContent = `Erstelle jetzt deine kostenlose Treuekarte bei ${restaurant.name}.`;
+    document.getElementById('restaurant-reward-tag').textContent =
+      mainReward ? `${restaurant.max_stamps} Stempel = ${mainReward.reward_text}` : `${restaurant.max_stamps} Stempel = Belohnung`;
+
+    // Akzentfarbe anwenden
+    if (restaurant.color) document.documentElement.style.setProperty('--accent', restaurant.color);
+
+    show('view-form');
+  } catch (e) {
+    show('view-error');
+  }
+}
+
+async function registerCustomer() {
+  const name = document.getElementById('customer-name').value.trim();
+  if (!name) { alert('Bitte gib deinen Namen ein.'); return; }
+
+  const btn = document.getElementById('register-btn');
+  btn.disabled = true;
+  btn.textContent = 'Karte wird erstellt...';
+
+  const birthday = document.getElementById('customer-birthday').value || null;
+
+  try {
+    const res = await fetch(`${SUPA_URL}/rest/v1/customers`, {
+      method: 'POST', headers: H,
+      body: JSON.stringify({
+        restaurant_id: restaurantId,
+        name,
+        birthday,
+        stamps: 0,
+        total_stamps: 0,
+      }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    const customer = Array.isArray(data) ? data[0] : data;
+
+    // Kunden-ID lokal speichern
+    localStorage.setItem('lumi_card_' + restaurantId, customer.id);
+    localStorage.setItem('lumi_last_restaurant', restaurantId);
+
+    // Zur Kundenkarte weiterleiten
+    window.location.href = `card.html?c=${customer.id}&r=${restaurantId}`;
+
+  } catch (e) {
+    alert('Fehler beim Erstellen: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = 'Meine Karte erstellen →';
+  }
+}
+
+function goToMyCard() {
+  const myCardId = localStorage.getItem('lumi_card_' + restaurantId);
+  window.location.href = `card.html?c=${myCardId}&r=${restaurantId}`;
+}
+
+init();
+</script>
+</body>
+</html>
