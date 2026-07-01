@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>LumiStamp · Admin</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jsconfetti/1.4.0/js-confetti.browser.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsqr/1.4.0/jsQR.js"></script>
 <style>
 :root { --accent: #ff6b35; --bg: #0f0f0f; --surface: #1a1a1a; --surface2: #242424; --border: #2e2e2e; --text: #f0ede8; --muted: #888; --green: #4ade80; }
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -51,6 +52,17 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .cstamps { margin-left: auto; text-align: right; }
 .cstamps strong { display: block; font-size: 15px; font-weight: 700; color: var(--accent); }
 .cstamps span { font-size: 11px; color: var(--muted); }
+
+/* Camera Scanner */
+.cam-wrap { position: relative; width: 100%; border-radius: 12px; overflow: hidden; background: #000; margin-bottom: 12px; display: none; }
+.cam-wrap.active { display: block; }
+.cam-video { width: 100%; display: block; max-height: 320px; object-fit: cover; }
+.cam-frame { position: absolute; top: 50%; left: 50%; width: 62%; aspect-ratio: 1; transform: translate(-50%,-50%); border: 2px solid var(--accent); border-radius: 14px; box-shadow: 0 0 0 999px rgba(0,0,0,0.35); pointer-events: none; }
+.cam-hint { position: absolute; bottom: 10px; left: 0; right: 0; text-align: center; font-size: 12px; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,0.6); }
+.cam-close { position: absolute; top: 8px; right: 8px; width: 30px; height: 30px; border-radius: 50%; background: rgba(0,0,0,0.5); color: #fff; border: none; font-size: 16px; cursor: pointer; }
+.divider-row { display: flex; align-items: center; gap: 10px; margin: 12px 0; }
+.divider-row .line { flex: 1; height: 1px; background: var(--border); }
+.divider-row span { font-size: 11px; color: var(--muted); }
 
 /* Scanner Result */
 .scan-result { border: 1px solid rgba(255,107,53,0.35); border-radius: 14px; padding: 18px; background: rgba(255,107,53,0.05); margin-top: 12px; }
@@ -116,12 +128,25 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
     <!-- ── SCANNER TAB ── -->
     <div class="view active" id="tab-scanner">
       <div class="card">
-        <div class="section-title">Kunden-ID eingeben</div>
-        <p style="font-size:13px;color:var(--muted);margin-bottom:12px">Gib die Kunden-UUID ein (steht auf der Karte). Im echten Einsatz würde hier die Kamera öffnen.</p>
+        <div class="section-title">QR-Code scannen</div>
+
+        <div class="cam-wrap" id="cam-wrap">
+          <video class="cam-video" id="cam-video" playsinline muted></video>
+          <div class="cam-frame"></div>
+          <div class="cam-hint">QR-Code der Kundenkarte ins Feld halten</div>
+          <button class="cam-close" id="cam-close-btn" onclick="stopScanner()">✕</button>
+        </div>
+        <canvas id="cam-canvas" style="display:none"></canvas>
+
+        <button class="btn btn-primary" id="cam-start-btn" onclick="startScanner()">📷 Kamera-Scan starten</button>
+
+        <div class="divider-row"><div class="line"></div><span>ODER MANUELL</span><div class="line"></div></div>
+
         <div style="display:flex;gap:8px">
           <input class="input" id="scan-input" placeholder="Kunden-ID (UUID)..." type="text" style="flex:1">
           <button class="btn-secondary" style="padding:0 16px;border:1px solid var(--border);border-radius:9px;cursor:pointer;background:var(--surface2);color:var(--text);font-family:inherit;font-size:14px;white-space:nowrap" onclick="lookupCustomer()">Suchen</button>
         </div>
+
 
         <div id="scan-result-area" style="display:none">
           <div class="scan-result" id="scan-result-card">
@@ -223,6 +248,7 @@ function switchTab(name) {
     t.classList.toggle('active', ['scanner','dashboard','kunden','marketing'][i] === name));
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.getElementById('tab-' + name).classList.add('active');
+  if (name !== 'scanner') stopScanner();
 }
 
 function timeAgo(dateStr) {
@@ -350,7 +376,67 @@ function renderRecentActivity() {
   });
 }
 
-// ── Scanner ────────────────────────────────────────────────────────────────
+// ── Kamera QR-Scanner ─────────────────────────────────────────────────────
+let camStream = null;
+let camRAF = null;
+let camBusy = false; // verhindert Doppel-Treffer während Lookup läuft
+
+async function startScanner() {
+  const video = document.getElementById('cam-video');
+  const wrap = document.getElementById('cam-wrap');
+  const startBtn = document.getElementById('cam-start-btn');
+
+  try {
+    camStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } }
+    });
+    video.srcObject = camStream;
+    await video.play();
+    wrap.classList.add('active');
+    startBtn.style.display = 'none';
+    camBusy = false;
+    requestAnimationFrame(scanFrame);
+  } catch (e) {
+    notif('Kamera-Zugriff nicht möglich: ' + e.message, 'error');
+  }
+}
+
+function stopScanner() {
+  if (camRAF) cancelAnimationFrame(camRAF);
+  camRAF = null;
+  if (camStream) {
+    camStream.getTracks().forEach(t => t.stop());
+    camStream = null;
+  }
+  document.getElementById('cam-wrap').classList.remove('active');
+  document.getElementById('cam-start-btn').style.display = 'block';
+}
+
+function scanFrame() {
+  if (!camStream) return;
+  const video = document.getElementById('cam-video');
+  const canvas = document.getElementById('cam-canvas');
+
+  if (video.readyState === video.HAVE_ENOUGH_DATA && !camBusy) {
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' });
+
+    if (code && code.data) {
+      camBusy = true;
+      document.getElementById('scan-input').value = code.data;
+      stopScanner();
+      lookupCustomer();
+      return; // Scan-Loop beendet
+    }
+  }
+  camRAF = requestAnimationFrame(scanFrame);
+}
+
+// ── Scanner (manuelle Eingabe / Lookup) ─────────────────────────────────────
 async function lookupCustomer() {
   const rawId = document.getElementById('scan-input').value.trim();
   if (!rawId) return;
