@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>LumiStamp · Admin</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jsconfetti/1.4.0/js-confetti.browser.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jsqr/1.4.0/jsQR.js"></script>
+<script src="https://unpkg.com/jsqr@1.4.0/dist/jsQR.js"></script>
 <style>
 :root { --accent: #ff6b35; --bg: #0f0f0f; --surface: #1a1a1a; --surface2: #242424; --border: #2e2e2e; --text: #f0ede8; --muted: #888; --green: #4ade80; }
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -53,6 +53,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .cstamps strong { display: block; font-size: 15px; font-weight: 700; color: var(--accent); }
 .cstamps span { font-size: 11px; color: var(--muted); }
 
+.cam-scanning { position: absolute; top: 8px; left: 8px; background: rgba(255,107,53,0.85); color: #fff; font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 20px; animation: pulse 1s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
 /* Camera Scanner */
 .cam-wrap { position: relative; width: 100%; border-radius: 12px; overflow: hidden; background: #000; margin-bottom: 12px; display: none; }
 .cam-wrap.active { display: block; }
@@ -132,6 +134,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 
         <div class="cam-wrap" id="cam-wrap">
           <video class="cam-video" id="cam-video" playsinline muted></video>
+          <div class="cam-scanning" id="cam-scanning">● Scannt...</div>
           <div class="cam-frame"></div>
           <div class="cam-hint">QR-Code der Kundenkarte ins Feld halten</div>
           <button class="cam-close" id="cam-close-btn" onclick="stopScanner()">✕</button>
@@ -378,62 +381,62 @@ function renderRecentActivity() {
 
 // ── Kamera QR-Scanner ─────────────────────────────────────────────────────
 let camStream = null;
-let camRAF = null;
-let camBusy = false; // verhindert Doppel-Treffer während Lookup läuft
+let camInterval = null;
 
 async function startScanner() {
   const video = document.getElementById('cam-video');
   const wrap = document.getElementById('cam-wrap');
   const startBtn = document.getElementById('cam-start-btn');
 
+  // Prüfen ob jsQR geladen ist
+  if (typeof jsQR === 'undefined') {
+    notif('❌ Scanner-Bibliothek lädt noch, bitte kurz warten und nochmal versuchen.', 'error');
+    return;
+  }
+
   try {
     camStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } }
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
     });
     video.srcObject = camStream;
     await video.play();
     wrap.classList.add('active');
     startBtn.style.display = 'none';
-    camBusy = false;
-    requestAnimationFrame(scanFrame);
+
+    // Alle 250ms ein Frame analysieren
+    camInterval = setInterval(scanFrame, 250);
   } catch (e) {
-    notif('Kamera-Zugriff nicht möglich: ' + e.message, 'error');
+    notif('Kamera-Zugriff verweigert oder nicht verfügbar.', 'error');
   }
 }
 
 function stopScanner() {
-  if (camRAF) cancelAnimationFrame(camRAF);
-  camRAF = null;
-  if (camStream) {
-    camStream.getTracks().forEach(t => t.stop());
-    camStream = null;
-  }
+  if (camInterval) { clearInterval(camInterval); camInterval = null; }
+  if (camStream) { camStream.getTracks().forEach(t => t.stop()); camStream = null; }
   document.getElementById('cam-wrap').classList.remove('active');
   document.getElementById('cam-start-btn').style.display = 'block';
 }
 
 function scanFrame() {
-  if (!camStream) return;
   const video = document.getElementById('cam-video');
   const canvas = document.getElementById('cam-canvas');
+  if (!video || video.readyState < 2 || video.videoWidth === 0) return;
 
-  if (video.readyState === video.HAVE_ENOUGH_DATA && !camBusy) {
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' });
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    if (code && code.data) {
-      camBusy = true;
-      document.getElementById('scan-input').value = code.data;
-      stopScanner();
-      lookupCustomer();
-      return; // Scan-Loop beendet
-    }
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const code = jsQR(imageData.data, imageData.width, imageData.height, {
+    inversionAttempts: 'attemptBoth'
+  });
+
+  if (code && code.data && code.data.trim().length > 0) {
+    stopScanner();
+    document.getElementById('scan-input').value = code.data.trim();
+    lookupCustomer();
   }
-  camRAF = requestAnimationFrame(scanFrame);
 }
 
 // ── Scanner (manuelle Eingabe / Lookup) ─────────────────────────────────────
