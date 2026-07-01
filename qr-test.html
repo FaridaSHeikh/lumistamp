@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QR Scanner Test</title>
+<script src="https://unpkg.com/jsqr@1.4.0/dist/jsQR.js"></script>
+<style>
+body { font-family: sans-serif; background: #111; color: #fff; padding: 20px; max-width: 480px; margin: 0 auto; }
+video { width: 100%; border-radius: 10px; display: block; margin: 10px 0; }
+canvas { display: none; }
+button { padding: 12px 20px; background: #ff6b35; color: #fff; border: none; border-radius: 8px; font-size: 15px; cursor: pointer; width: 100%; margin: 6px 0; }
+.log { background: #222; border-radius: 8px; padding: 12px; font-size: 13px; margin-top: 10px; line-height: 1.8; min-height: 80px; }
+.ok { color: #4ade80; }
+.err { color: #ff6b6b; }
+.info { color: #888; }
+.result { background: #1a3d1a; border: 1px solid #4ade80; border-radius: 8px; padding: 14px; margin-top: 10px; font-size: 14px; display: none; }
+</style>
+</head>
+<body>
+<h2>🔍 QR Scanner Test</h2>
+<p style="font-size:13px;color:#888">Diese Seite zeigt dir genau was passiert.</p>
+
+<div id="log" class="log"><span class="info">Warte auf Start...</span></div>
+
+<video id="video" playsinline muted autoplay></video>
+<canvas id="canvas"></canvas>
+
+<button onclick="startTest()">▶ Kamera starten & scannen</button>
+<button onclick="stopTest()" style="background:#333">■ Stoppen</button>
+
+<div id="result" class="result"></div>
+
+<script>
+let stream = null;
+let interval = null;
+let frameCount = 0;
+
+function log(msg, type = 'info') {
+  const el = document.getElementById('log');
+  const line = document.createElement('div');
+  line.className = type;
+  line.textContent = new Date().toLocaleTimeString() + ' – ' + msg;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+
+async function startTest() {
+  document.getElementById('log').innerHTML = '';
+  document.getElementById('result').style.display = 'none';
+  frameCount = 0;
+
+  // 1. jsQR check
+  if (typeof jsQR === 'undefined') {
+    log('❌ jsQR NICHT geladen! Kein Internet oder CDN-Problem.', 'err');
+    return;
+  }
+  log('✅ jsQR erfolgreich geladen', 'ok');
+
+  // 2. Kamera
+  log('📷 Kamera wird angefragt...', 'info');
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' } }
+    });
+    const video = document.getElementById('video');
+    video.srcObject = stream;
+    await video.play();
+    log('✅ Kamera aktiv: ' + stream.getVideoTracks()[0].label, 'ok');
+  } catch(e) {
+    log('❌ Kamera-Fehler: ' + e.message, 'err');
+    return;
+  }
+
+  // 3. Scan-Loop
+  log('🔍 Scan-Loop gestartet (alle 300ms)...', 'info');
+  interval = setInterval(scanFrame, 300);
+}
+
+function scanFrame() {
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+
+  if (video.videoWidth === 0) {
+    if (frameCount === 0) log('⏳ Video hat noch keine Größe, warte...', 'info');
+    frameCount++;
+    return;
+  }
+
+  if (frameCount % 10 === 0) {
+    log('Frame ' + frameCount + ' – Bildgröße: ' + video.videoWidth + 'x' + video.videoHeight, 'info');
+  }
+  frameCount++;
+
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0);
+  const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+  const code = jsQR(imgData.data, imgData.width, imgData.height, {
+    inversionAttempts: 'attemptBoth'
+  });
+
+  if (code && code.data) {
+    stopTest();
+    log('✅ QR-CODE ERKANNT!', 'ok');
+    const result = document.getElementById('result');
+    result.style.display = 'block';
+    result.innerHTML = '<strong>Erkannter Inhalt:</strong><br><code style="word-break:break-all">' + code.data + '</code>';
+  }
+}
+
+function stopTest() {
+  if (interval) { clearInterval(interval); interval = null; }
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  log('■ Gestoppt', 'info');
+}
+</script>
+</body>
+</html>
